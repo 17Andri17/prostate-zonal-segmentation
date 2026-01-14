@@ -413,6 +413,7 @@ class ProstateSegmentationTrainer:
 
     def visualize_predictions(self, results: Dict, num_samples: int = 5, folder_name: str = 'visualizations'):
         """Visualize model predictions"""
+        
         label_names = ['NO-PG', 'AFS', 'CZ', 'PZ', 'SV_L', 'SV_R', 'TZ']  #['NO-PG', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
         colors = ['black','red', 'cyan', 'green', 'yellow', 'purple', 'orange'] #'blue'
         cmap = ListedColormap(colors)
@@ -475,7 +476,7 @@ class ProstateSegmentationTrainer:
             )
 
             #plt.tight_layout()
-            timestamp = time.strftime('%H%M%S')
+            timestamp = time.strftime('%Y%m%d_%H%M')
             file_name = f"patient_{patient_id}_sample_{sample_idx}_{timestamp}.png"
 
             save_path = os.path.join(folder_name, file_name)
@@ -672,7 +673,7 @@ if __name__ == '__main__':
     # Apply multi-annotator fusion or STAPLE
     fusion_method = STAPLEFusionProvider()
 
-    base_folder = "exp/STAPLE"
+    base_folder = "exp/STAPLE_100_epochs"
     exp_name = f"{base_folder}"
     os.makedirs(exp_name, exist_ok=True)
     
@@ -682,7 +683,7 @@ if __name__ == '__main__':
     run_training(
         fusion_method=fusion_method,
         batch_size=64, 
-        num_epochs=50, 
+        num_epochs=100, 
         data_subset=False, 
         num_workers=16,
         data_root=DATA_PATH,
