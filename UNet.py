@@ -73,7 +73,7 @@ class OutConv(nn.Module):
 class UNet(nn.Module):
     """U-Net architecture for prostate segmentation"""
 
-    def __init__(self, n_channels=1, n_classes=7, bilinear=True):
+    def __init__(self, n_channels=1, n_classes=3, bilinear=True):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes

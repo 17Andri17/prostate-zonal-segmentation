@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import re
 import time
 from collections import defaultdict
 from typing import List, Tuple, Dict
@@ -19,6 +20,8 @@ from AnnotationFusion import MultiAnnotatorFusion, MultiAnnotatorUNetDataset, ST
 from DataUtils import MultiAnnotatorProstateDataset
 from UNet import UNet
 from Loss import CombinedLoss
+from utils import find_common_patients
+
 
 def setup_logging(exp_path):
     log_filename = os.path.join(exp_path, f"training.log")
@@ -411,11 +414,11 @@ class ProstateSegmentationTrainer:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.show()
 
-    def visualize_predictions(self, results: Dict, num_samples: int = 5, folder_name: str = 'visualizations'):
+    def visualize_predictions(self, results: Dict, num_samples: int = 3, folder_name: str = 'visualizations'):
         """Visualize model predictions"""
         
-        label_names = ['NO-PG', 'AFS', 'CZ', 'PZ', 'SV_L', 'SV_R', 'TZ']  #['NO-PG', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
-        colors = ['black','red', 'cyan', 'green', 'yellow', 'purple', 'orange'] #'blue'
+        label_names = ['NO-PG', 'PZ', 'TZ']  #['NO-PG', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
+        colors = ['black', 'cyan', 'green'] #'blue'
         cmap = ListedColormap(colors)
         norm = BoundaryNorm(range(len(colors) + 1), cmap.N)
 
@@ -494,17 +497,20 @@ def run_training(
     num_workers=16,
     data_root="/root/data/AI4AR_cont/Data",
     labels_root="/root/data/AI4AR_cont/Anatomical_Labels",
+    prostatex_root="/root/data/AI4AR_cont/ProstateZones",
     experiment_name="exp/STAPLE"
 ):
+    logger.info("Alive")
 
-    if not os.path.exists(data_root) or not os.path.exists(labels_root):
-        print(f"Error: Paths not found!\nData: {data_root}\nLabels: {labels_root}")
+    if not os.path.exists(data_root) or not os.path.exists(labels_root) or not os.path.exists(prostatex_root):
+        logger.error(f"Error: Paths not found!\nData: {data_root}\nLabels: {labels_root}\nProstateX: {prostatex_root}")
         return
 
+    with open("common_ids.txt", "r") as f:
+        patient_ids = [line.strip() for line in f if line.strip()]
 
-    # Get patient IDs
-    patient_ids = [d for d in os.listdir(data_root)
-                   if os.path.isdir(os.path.join(data_root, d))]
+
+    # patient_ids = [d for d in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, d))]
 
     # Sort numerically
     patient_ids = sorted(patient_ids, key=lambda x: int(x))
@@ -512,7 +518,7 @@ def run_training(
 
     if data_subset:
         patient_ids, _ = train_test_split(patient_ids, test_size=0.75, random_state=42)
-        print(f"--- DEBUG MODE: Using subset of {len(patient_ids)} patients ---")
+        logger.info(f"--- DEBUG MODE: Using subset of {len(patient_ids)} patients ---")
 
     # Split data
     train_ids, test_ids = train_test_split(patient_ids, test_size=0.2, random_state=42)
@@ -526,6 +532,7 @@ def run_training(
     train_dataset = MultiAnnotatorProstateDataset(
         data_root=data_root,
         labels_root=labels_root,
+        prostatex_root=prostatex_root,
         patient_ids=train_ids,
         modalities=['t2w'], # 'cor', 'sag',
         target_size=(256, 256),
@@ -537,6 +544,7 @@ def run_training(
     val_dataset = MultiAnnotatorProstateDataset(
         data_root=data_root,
         labels_root=labels_root,
+        prostatex_root=prostatex_root,
         patient_ids=val_ids,
         modalities=['t2w'], # 'cor', 'sag',
         target_size=(256, 256),
@@ -548,6 +556,7 @@ def run_training(
     test_dataset = MultiAnnotatorProstateDataset(
         data_root=data_root,
         labels_root=labels_root,
+        prostatex_root=prostatex_root,
         patient_ids=test_ids,
         modalities=['t2w'], # 'cor', 'sag',
         target_size=(256, 256),
@@ -607,7 +616,7 @@ def run_training(
     logger.info(f"Batch labels shape: {test_batch['labels'].shape}")
 
     # Create model
-    model = UNet(n_channels=1, n_classes=7, bilinear=True)
+    model = UNet(n_channels=1, n_classes=3, bilinear=True)
 
     # Create trainer
     trainer = ProstateSegmentationTrainer(
@@ -640,22 +649,23 @@ def run_training(
     logger.info(f"\nOverall Dice Score: {avg_results['mean_dice']:.4f} ± {avg_results['std_dice']:.4f}")
     logger.info("\nPer-class Dice Scores:")
 
-    label_names = ['NO', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
-    for class_idx in range(7):
+    label_names = ['NO-PG', 'PZ', 'TZ']
+    for class_idx in range(3):
         mean_dice = avg_results['per_class_mean_dice'][class_idx]
         std_dice = avg_results['per_class_std_dice'][class_idx]
         logger.info(f"  {label_names[class_idx]:6s}: {mean_dice:.4f} ± {std_dice:.4f}")
 
     # Visualize predictions
     logger.info("\nGenerating prediction visualizations...")
-    trainer.visualize_predictions(detailed_results, num_samples=10, folder_name=experiment_name)
+    # WYWALA SIĘ JAK NUM_SAMPLES JEST WIĘKSZE (NP. 10)----????
+    trainer.visualize_predictions(detailed_results, num_samples=3, folder_name=experiment_name)
 
     # Save final model
     torch.save({
         'model_state_dict': trainer.model.state_dict(),
         'model_config': {
             'n_channels': 1,
-            'n_classes': 7,
+            'n_classes': 3,
             'bilinear': True
         },
         'metrics': avg_results
@@ -667,8 +677,12 @@ def run_training(
 
 if __name__ == '__main__':
     #TO RUN ON SMALL SUBSET OF DATA, SET DATA_SUBSET=True
-    DATA_PATH = r"/root/data/AI4AR_cont/Data"
-    LABELS_PATH = r"/root/data/AI4AR_cont/Anatomical_Labels"
+    DATA_PATH = r"AI4AR_cont/Data"
+    LABELS_PATH = r"AI4AR_cont/Anatomical_Labels"
+    PROSTATEX_PATH = r"ProstateZones"
+
+    #RUN ONLY ONCE (OR WHEN DATA FILES CHANGE)
+    find_common_patients(DATA_PATH, PROSTATEX_PATH)
 
     # Apply multi-annotator fusion or STAPLE
     fusion_method = STAPLEFusionProvider()
@@ -682,11 +696,12 @@ if __name__ == '__main__':
     
     run_training(
         fusion_method=fusion_method,
-        batch_size=64, 
-        num_epochs=100, 
-        data_subset=False, 
-        num_workers=16,
+        batch_size=4,
+        num_epochs=1,
+        data_subset=False,
+        num_workers=0,
         data_root=DATA_PATH,
         labels_root=LABELS_PATH,
+        prostatex_root = PROSTATEX_PATH,
         experiment_name=exp_name
     )

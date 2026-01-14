@@ -16,6 +16,7 @@ class MultiAnnotatorProstateDataset(Dataset):
     def __init__(self,
                  data_root: str,
                  labels_root: str,
+                 prostatex_root: str,
                  patient_ids: List[str],
                  modalities: List[str] = ['t2w'],  # ['cor', 'sag', 't2w'],
                  transform=None,
@@ -35,8 +36,20 @@ class MultiAnnotatorProstateDataset(Dataset):
             num_annotators: Number of simulated annotators
             annotator_variance: Amount of noise to add to simulate different annotators
         """
+        self.region_map = {
+            "afs": [4],
+            "cz": [2],
+            "pg": [0],
+            "pz": [1],
+            "tz": [3,5],
+        }
+        self.final_zones = {
+            "PZ": ["pz"],
+            "TZ": ["tz", "afs", "cz"]
+        }
         self.data_root = data_root
         self.labels_root = labels_root
+        self.prostatex_root = prostatex_root
         self.patient_ids = patient_ids
         self.modalities = modalities
         self.transform = transform
@@ -83,7 +96,7 @@ class MultiAnnotatorProstateDataset(Dataset):
                 # Get anatomical labels
                 label_files = {}
                 available_labels = os.listdir(label_path)
-                anatomical_regions = ['afs', 'cz', 'pg', 'pz', 'sv_l', 'sv_r', 'tz']
+                anatomical_regions = ['afs', 'cz', 'pg', 'pz', 'tz']
 
                 for region in anatomical_regions:
                     # Try with and without leading zeros
@@ -106,7 +119,7 @@ class MultiAnnotatorProstateDataset(Dataset):
                 })
 
         print(f"Loaded {len(self.samples)} patients with {len(modalities)} modalities each")
-        print(f"Simulating {num_annotators} annotators with variance {annotator_variance}")
+        #print(f"Simulating {num_annotators} annotators with variance {annotator_variance}")
 
     def __len__(self):
         return len(self.samples)
@@ -149,7 +162,7 @@ class MultiAnnotatorProstateDataset(Dataset):
             print(f"Error loading {filepath}: {e}")
             return np.zeros(self.target_size)
 
-    def load_labels(self, label_files: Dict) -> Dict[str, np.ndarray]:
+    def load_labels_nii(self, label_files: Dict) -> Dict[str, np.ndarray]:
         """Load all anatomical labels"""
         labels = {}
         for region, filepath in label_files.items():
@@ -178,6 +191,47 @@ class MultiAnnotatorProstateDataset(Dataset):
             except Exception as e:
                 print(f"Error loading label {region}: {e}")
                 labels[region] = np.zeros(self.target_size)
+
+        return labels
+
+    def load_labels_nrrd(self, filepath) -> Dict[str, np.ndarray]:
+        """
+        Load anatomical labels from a multi-label .nrrd file.
+        Extracts separate 2D masks for each region defined in self.region_map.
+        """
+        labels = {}
+
+        try:
+            seg_img = sitk.ReadImage(filepath)
+            seg_np = sitk.GetArrayFromImage(seg_img)  # shape: [z, y, x]
+
+            # Middle slice
+            if seg_np.ndim != 3:
+                raise ValueError("Expected a 3D segmentation volume.")
+            z_mid = seg_np.shape[0] // 2
+            slice_2d = seg_np[z_mid]
+
+            # Extract each region mask
+            for region_name, region_labels in self.region_map.items():
+                for region_label in region_labels:
+                    mask = (slice_2d == region_label).astype(np.float32)
+
+                    # Resize if needed
+                    if self.target_size and mask.shape != self.target_size:
+                        from scipy.ndimage import zoom
+                        zoom_factors = (
+                            self.target_size[0] / mask.shape[0],
+                            self.target_size[1] / mask.shape[1]
+                        )
+                        mask = zoom(mask, zoom_factors, order=0)
+
+                    labels[region_name] = mask
+
+        except Exception as e:
+            print(f"Error loading .nrrd segmentation: {e}")
+            # Return empty masks for each region
+            for region_name in self.region_map:
+                labels[region_name] = np.zeros(self.target_size, dtype=np.float32)
 
         return labels
 
@@ -217,53 +271,63 @@ class MultiAnnotatorProstateDataset(Dataset):
 
         # Stack modalities along channel dimension
         image = np.stack(modality_images, axis=0).astype(np.float32)
-
-        # Load labels
-        labels_dict = self.load_labels(sample['label_files'])
-
-        # Compute background = 1 - union of all zones
-        # all_zones = np.zeros(self.target_size, dtype=np.float32)
-        # for arr in labels_dict.values():
-        #     all_zones = np.logical_or(all_zones, arr > 0)
-
-        background = (labels_dict.get('pg', np.zeros(self.target_size)) == 0).astype(np.float32)
-
-        # Convert labels dict to tensor
-        base_labels = np.stack([
-            background,  # NEW CLASS 0
-            labels_dict.get('afs', np.zeros(self.target_size)),
-            labels_dict.get('cz', np.zeros(self.target_size)),
-            # labels_dict.get('pg', np.zeros(self.target_size)),
-            labels_dict.get('pz', np.zeros(self.target_size)),
-            labels_dict.get('sv_l', np.zeros(self.target_size)),
-            labels_dict.get('sv_r', np.zeros(self.target_size)),
-            labels_dict.get('tz', np.zeros(self.target_size))
-        ], axis=0).astype(np.float32)
-
         # Apply transformations
         if self.transform:
             image = self.transform(image)
-            base_labels = self.transform(base_labels)
-
         # Convert to PyTorch tensors
         image_tensor = torch.from_numpy(image)
-        base_labels_tensor = torch.from_numpy(base_labels)
+        # Load labels
+        labels_dict = self.load_labels_nii(sample['label_files'])
+        base_labels_tensor = self.transform_labels(labels_dict)
 
-        # Generate annotations from multiple annotators
-        annotator_labels = []
-        for i in range(self.num_annotators):
-            noisy_labels = self.add_annotator_noise(base_labels_tensor, i)
-            annotator_labels.append(noisy_labels)
+        pid4 = f"{int(sample['patient_id']):04d}"
+        singles_path = f"ProstateZones/Singles/Seg-{pid4}.nrrd"
+        dup_r1_path = f"ProstateZones/Duplicates/R1/Seg-{pid4}_R1.nrrd"
+        if os.path.exists(singles_path):
+             labels_dictx = self.load_labels_nrrd(singles_path)
+        elif os.path.exists(dup_r1_path):
+            labels_dictx = self.load_labels_nrrd(dup_r1_path)
+        else:
+            raise Exception(f"Prostatex segmentation for patient {pid4} not found")
+
+        prostatex_tensor = self.transform_labels(labels_dictx)
 
         # Stack annotator labels
-        all_labels = torch.stack(annotator_labels, dim=0)  # [num_annotators, num_classes, H, W]
+        all_labels = torch.stack([base_labels_tensor, prostatex_tensor], dim=0)  # [num_annotators, num_classes, H, W]
 
         return {
             'image': image_tensor,
             'labels': all_labels,  # Multiple annotator labels
             'base_label': base_labels_tensor,  # Clean/original label
             'patient_id': sample['patient_id'],
-            'label_names': ['NO-PG', 'AFS', 'CZ', 'PZ', 'SV_L', 'SV_R', 'TZ'],
-            # ['NO-PG','AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ'],
+            'label_names': ['NO-PG', 'PZ', 'TZ'],
             'num_annotators': self.num_annotators
         }
+
+    def transform_labels(self, labels_dict):
+        # Background: pg == 0
+        background = (labels_dict.get('pg', np.zeros(self.target_size)) == 0).astype(np.float32)
+
+        # PZ class (single source)
+        pz = labels_dict.get('pz', np.zeros(self.target_size)).astype(np.float32)
+
+        # TZ class = union of tz + afs + cz
+        tz = (
+                labels_dict.get('tz', np.zeros(self.target_size)) +
+                labels_dict.get('afs', np.zeros(self.target_size)) +
+                labels_dict.get('cz', np.zeros(self.target_size))
+        )
+        tz = (tz > 0).astype(np.float32)  # ensure binary mask
+
+        # Stack into 3‑class output
+        base_labels = np.stack([
+            background,  # class 0
+            pz,  # class 1
+            tz  # class 2
+        ], axis=0).astype(np.float32)
+
+        # Optional transforms
+        if self.transform:
+            base_labels = self.transform(base_labels)
+
+        return torch.from_numpy(base_labels)

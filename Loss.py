@@ -31,7 +31,7 @@ class CombinedLoss(nn.Module):
     def __init__(self, dice_weight=0.5, ce_weight=0.5):
         super(CombinedLoss, self).__init__()
         self.dice_loss = DiceLoss()
-        weights = torch.tensor([0.1, 1, 1, 1, 1, 1, 1])
+        weights = torch.tensor([0.1, 1, 1])
         self.ce_loss = nn.CrossEntropyLoss(weight=weights)
         self.dice_weight = dice_weight
         self.ce_weight = ce_weight

@@ -11,7 +11,7 @@ class MultiAnnotatorFusion:
     Handles pixel-level ambiguity, annotator reliability, and probabilistic fusion.
     """
 
-    def __init__(self, num_classes: int = 7, epsilon: float = 1e-8):
+    def __init__(self, num_classes: int = 3, epsilon: float = 1e-8):
         self.num_classes = num_classes
         self.epsilon = epsilon
         self.annotator_reliabilities = None
@@ -22,7 +22,7 @@ class MultiAnnotatorFusion:
 
         Args:
             annotations: Tensor of shape [N, H, W] where N is number of annotators
-                        Each pixel contains class index (0-6)
+                        Each pixel contains class index (0-4)
 
         Returns:
             ambiguity_weights: Tensor of shape [H, W] with values in [0, 1]
@@ -135,7 +135,7 @@ class STAPLEFusionProvider:
     Alternative fusion provider using the STAPLE algorithm.
     Matches the interface of MultiAnnotatorFusion.
     """
-    def __init__(self, num_classes: int = 7, max_iter: int = 20, tol: float = 1e-4):
+    def __init__(self, num_classes: int = 3, max_iter: int = 20, tol: float = 1e-4):
         self.num_classes = num_classes
         self.max_iter = max_iter
         self.tol = tol
