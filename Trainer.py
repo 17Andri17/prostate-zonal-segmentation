@@ -20,9 +20,21 @@ from DataUtils import MultiAnnotatorProstateDataset
 from UNet import UNet
 from Loss import CombinedLoss
 
+
+log_filename = f"training_{time.strftime('%Y%m%d_%H%M%S')}.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_filename),
+        logging.StreamHandler()            
+    ]
+)
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
+logger.info(f"Logging initialized. Saving to {log_filename}")
 
 class ProstateSegmentationTrainer:
     """Complete training and evaluation pipeline"""
@@ -43,7 +55,7 @@ class ProstateSegmentationTrainer:
         self.device = device
 
         # Loss function - use combined loss
-        self.criterion = CombinedLoss(dice_weight=0.7, ce_weight=0.3)
+        self.criterion = CombinedLoss(dice_weight=0.7, ce_weight=0.3).to(device)
 
         # Optimizer
         self.optimizer = torch.optim.AdamW(
@@ -91,7 +103,7 @@ class ProstateSegmentationTrainer:
             self.optimizer.zero_grad()
 
             if self.scaler:
-                with autocast():
+                with autocast(device_type=self.device):
                     outputs = self.model(images)
                     loss = self.criterion(outputs, labels)
 
@@ -461,27 +473,34 @@ class ProstateSegmentationTrainer:
             plt.show()
 
 
-def run_training(batch_size=16, load_pretrained=False):
-    # Set your paths here
-    DATA_ROOT = r"D:\Msc\sem2\prostate-zonal-segmentation\AI4AR_cont\Data"
-    LABELS_ROOT = r"D:\Msc\sem2\prostate-zonal-segmentation\AI4AR_cont\Anatomical_Labels"
+def run_training(
+    batch_size=16, 
+    num_epochs=50, 
+    load_pretrained=False, 
+    data_subset=False, 
+    num_workers=16,
+    data_root="/root/data/AI4AR_cont/Data",
+    labels_root="/root/data/AI4AR_cont/Anatomical_Labels"
+):
 
-    # Check paths
-    if not os.path.exists(DATA_ROOT) or not os.path.exists(LABELS_ROOT):
-        logger.error("Data paths not found! Please check the paths.")
+    if not os.path.exists(data_root) or not os.path.exists(labels_root):
+        print(f"Error: Paths not found!\nData: {data_root}\nLabels: {labels_root}")
         return
 
     # Get patient IDs
-    patient_ids = [d for d in os.listdir(DATA_ROOT)
-                   if os.path.isdir(os.path.join(DATA_ROOT, d))]
+    patient_ids = [d for d in os.listdir(data_root)
+                   if os.path.isdir(os.path.join(data_root, d))]
 
     # Sort numerically
     patient_ids = sorted(patient_ids, key=lambda x: int(x))
     logger.info(f"Found {len(patient_ids)} patients")
 
+    if data_subset:
+        patient_ids, _ = train_test_split(patient_ids, test_size=0.75, random_state=42)
+        print(f"--- DEBUG MODE: Using subset of {len(patient_ids)} patients ---")
+
     # Split data
-    patient_ids_sub, _ = train_test_split(patient_ids, test_size=0.75, random_state=42)
-    train_ids, test_ids = train_test_split(patient_ids_sub, test_size=0.2, random_state=42)
+    train_ids, test_ids = train_test_split(patient_ids, test_size=0.2, random_state=42)
     train_ids, val_ids = train_test_split(train_ids, test_size=0.2, random_state=42)
 
     logger.info(f"Train: {len(train_ids)} patients")
@@ -490,8 +509,8 @@ def run_training(batch_size=16, load_pretrained=False):
 
     # Create multi-annotator datasets
     train_dataset = MultiAnnotatorProstateDataset(
-        data_root=DATA_ROOT,
-        labels_root=LABELS_ROOT,
+        data_root=data_root,
+        labels_root=labels_root,
         patient_ids=train_ids,
         modalities=['t2w'], # 'cor', 'sag',
         target_size=(256, 256),
@@ -501,8 +520,8 @@ def run_training(batch_size=16, load_pretrained=False):
     )
 
     val_dataset = MultiAnnotatorProstateDataset(
-        data_root=DATA_ROOT,
-        labels_root=LABELS_ROOT,
+        data_root=data_root,
+        labels_root=labels_root,
         patient_ids=val_ids,
         modalities=['t2w'], # 'cor', 'sag',
         target_size=(256, 256),
@@ -512,8 +531,8 @@ def run_training(batch_size=16, load_pretrained=False):
     )
 
     test_dataset = MultiAnnotatorProstateDataset(
-        data_root=DATA_ROOT,
-        labels_root=LABELS_ROOT,
+        data_root=data_root,
+        labels_root=labels_root,
         patient_ids=test_ids,
         modalities=['t2w'], # 'cor', 'sag',
         target_size=(256, 256),
@@ -548,7 +567,7 @@ def run_training(batch_size=16, load_pretrained=False):
         train_fused_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=0,  # Set to 0 if you have issues with multiprocessing
+        num_workers=num_workers,  # Set to 0 if you have issues with multiprocessing
         pin_memory=True if torch.cuda.is_available() else False
     )
 
@@ -556,7 +575,7 @@ def run_training(batch_size=16, load_pretrained=False):
         val_fused_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=num_workers,
         pin_memory=True if torch.cuda.is_available() else False
     )
 
@@ -564,7 +583,7 @@ def run_training(batch_size=16, load_pretrained=False):
         test_fused_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=num_workers,
         pin_memory=True if torch.cuda.is_available() else False
     )
 
@@ -590,7 +609,7 @@ def run_training(batch_size=16, load_pretrained=False):
 
     if not load_pretrained:
         # Train model
-        trainer.train(num_epochs=2, patience=10)  # Reduced epochs for testing
+        trainer.train(num_epochs=num_epochs, patience=10)  # Reduced epochs for testing
         # Plot training history
         trainer.plot_training_history()
     else:
@@ -633,5 +652,15 @@ def run_training(batch_size=16, load_pretrained=False):
     logger.info(f"Test Dice: {avg_results['mean_dice']:.4f}")
 
 if __name__ == '__main__':
-    #RUNS ON VERY SMALL SUBSET OF DATA!!!!!!!!!!!!!
-    run_training(batch_size=4)
+    #TO RUN ON SMALL SUBSET OF DATA, SET DATA_SUBSET=True
+    DATA_PATH = r"/root/data/AI4AR_cont/Data"
+    LABELS_PATH = r"/root/data/AI4AR_cont/Anatomical_Labels"
+
+    run_training(
+        batch_size=64, 
+        num_epochs=20, 
+        data_subset=False, 
+        num_workers=16,
+        data_root=DATA_PATH,
+        labels_root=LABELS_PATH
+    )
