@@ -15,26 +15,23 @@ from torch import GradScaler, autocast, nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from AnnotationFusion import MultiAnnotatorFusion, MultiAnnotatorUNetDataset
+from AnnotationFusion import MultiAnnotatorFusion, MultiAnnotatorUNetDataset, STAPLEFusionProvider
 from DataUtils import MultiAnnotatorProstateDataset
 from UNet import UNet
 from Loss import CombinedLoss
 
-
-log_filename = f"training_{time.strftime('%Y%m%d_%H%M%S')}.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_filename),
-        logging.StreamHandler()            
-    ]
-)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-logger.info(f"Logging initialized. Saving to {log_filename}")
+def setup_logging(exp_path):
+    log_filename = os.path.join(exp_path, f"training.log")
+    # Clear existing handlers
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+        
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[logging.FileHandler(log_filename), logging.StreamHandler()]
+    )
+    return logging.getLogger(__name__)
 
 class ProstateSegmentationTrainer:
     """Complete training and evaluation pipeline"""
@@ -46,13 +43,15 @@ class ProstateSegmentationTrainer:
                  test_loader: DataLoader,
                  device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
                  learning_rate: float = 1e-4,
-                 weight_decay: float = 1e-5):
+                 weight_decay: float = 1e-5,
+                 folder_name: str = ""):
 
         self.model = model.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
         self.device = device
+        self.folder_name = folder_name
 
         # Loss function - use combined loss
         self.criterion = CombinedLoss(dice_weight=0.7, ce_weight=0.3).to(device)
@@ -286,7 +285,7 @@ class ProstateSegmentationTrainer:
                     'val_dice': val_dice,
                     'train_loss': train_loss,
                     'train_dice': train_dice,
-                }, 'best_model.pth')
+                }, os.path.join(self.folder_name, 'best_model.pth'))
                 logger.info(f"  Saved best model with Dice: {val_dice:.4f}")
             else:
                 early_stop_counter += 1
@@ -314,7 +313,8 @@ class ProstateSegmentationTrainer:
         logger.info(f"\nTraining completed. Best validation Dice: {self.best_val_dice:.4f}")
 
     def load_pretrained_model(self):
-        self.model.load_state_dict(torch.load('best_model.pth', weights_only=True))
+        path = os.path.join(self.folder_name, 'best_model.pth')
+        self.model.load_state_dict(torch.load(path, weights_only=True))
 
     def evaluate(self, loader: DataLoader = None) -> Dict:
         """Evaluate model on test set"""
@@ -367,7 +367,7 @@ class ProstateSegmentationTrainer:
 
         return avg_results, results
 
-    def plot_training_history(self):
+    def plot_training_history(self, folder_name="training_history"):
         """Plot training and validation metrics"""
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
@@ -406,20 +406,26 @@ class ProstateSegmentationTrainer:
         axes[1, 1].grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(f'training_history_{time.strftime('%d-%m_%H:%M')}.png', dpi=150, bbox_inches='tight')
+        timestamp = time.strftime('%Y%m%d_%H%M')
+        save_path = os.path.join(folder_name, f'training_history_{timestamp}.png')
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.show()
 
-    def visualize_predictions(self, results: Dict, num_samples: int = 3):
+    def visualize_predictions(self, results: Dict, num_samples: int = 5, folder_name: str = 'visualizations'):
         """Visualize model predictions"""
         label_names = ['NO-PG', 'AFS', 'CZ', 'PZ', 'SV_L', 'SV_R', 'TZ']  #['NO-PG', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
         colors = ['black','red', 'cyan', 'green', 'yellow', 'purple', 'orange'] #'blue'
         cmap = ListedColormap(colors)
         norm = BoundaryNorm(range(len(colors) + 1), cmap.N)
 
-        for sample_idx in range(min(num_samples, len(results['predictions']))):
+
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name, exist_ok=True)
+
+        for sample_idx in range(num_samples):
             # Get sample
-            pred_probs = results['predictions'][sample_idx][0]  # First in batch
-            gt = results['ground_truths'][sample_idx][0]
+            pred_probs = results['predictions'][0][sample_idx] # Accessing patient index within batch 0
+            gt = results['ground_truths'][0][sample_idx]
             patient_id = results['patient_ids'][sample_idx]
 
             # Convert to class indices
@@ -469,23 +475,31 @@ class ProstateSegmentationTrainer:
             )
 
             #plt.tight_layout()
-            plt.savefig(f'prediction_sample_{sample_idx}_{time.strftime('%d-%m_%H:%M')}.png', dpi=150, bbox_inches='tight')
+            timestamp = time.strftime('%H%M%S')
+            file_name = f"patient_{patient_id}_sample_{sample_idx}_{timestamp}.png"
+
+            save_path = os.path.join(folder_name, file_name)
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
             plt.show()
+            plt.close(fig)
 
 
 def run_training(
+    fusion_method,
     batch_size=16, 
     num_epochs=50, 
     load_pretrained=False, 
     data_subset=False, 
     num_workers=16,
     data_root="/root/data/AI4AR_cont/Data",
-    labels_root="/root/data/AI4AR_cont/Anatomical_Labels"
+    labels_root="/root/data/AI4AR_cont/Anatomical_Labels",
+    experiment_name="exp/STAPLE"
 ):
 
     if not os.path.exists(data_root) or not os.path.exists(labels_root):
         print(f"Error: Paths not found!\nData: {data_root}\nLabels: {labels_root}")
         return
+
 
     # Get patient IDs
     patient_ids = [d for d in os.listdir(data_root)
@@ -541,8 +555,6 @@ def run_training(
         annotator_variance=0.1
     )
 
-    # Apply multi-annotator fusion
-    fusion_method = MultiAnnotatorFusion(num_classes=7)
 
     train_fused_dataset = MultiAnnotatorUNetDataset(
         base_dataset=train_dataset,
@@ -604,14 +616,15 @@ def run_training(
         test_loader=test_loader,
         device='cuda' if torch.cuda.is_available() else 'cpu',
         learning_rate=1e-4,
-        weight_decay=1e-5
+        weight_decay=1e-5,
+        folder_name=experiment_name
     )
 
     if not load_pretrained:
         # Train model
         trainer.train(num_epochs=num_epochs, patience=10)  # Reduced epochs for testing
         # Plot training history
-        trainer.plot_training_history()
+        trainer.plot_training_history(folder_name=experiment_name)
     else:
         trainer.load_pretrained_model()
 
@@ -634,7 +647,7 @@ def run_training(
 
     # Visualize predictions
     logger.info("\nGenerating prediction visualizations...")
-    trainer.visualize_predictions(detailed_results, num_samples=min(3, len(test_ids)))
+    trainer.visualize_predictions(detailed_results, num_samples=10, folder_name=experiment_name)
 
     # Save final model
     torch.save({
@@ -645,7 +658,7 @@ def run_training(
             'bilinear': True
         },
         'metrics': avg_results
-    }, 'final_model.pth')
+    }, os.path.join(experiment_name, 'final_model.pth'))
 
     logger.info("\nTraining completed successfully!")
     logger.info(f"Best validation Dice: {trainer.best_val_dice:.4f}")
@@ -656,11 +669,23 @@ if __name__ == '__main__':
     DATA_PATH = r"/root/data/AI4AR_cont/Data"
     LABELS_PATH = r"/root/data/AI4AR_cont/Anatomical_Labels"
 
+    # Apply multi-annotator fusion or STAPLE
+    fusion_method = STAPLEFusionProvider()
+
+    base_folder = "exp/STAPLE"
+    exp_name = f"{base_folder}"
+    os.makedirs(exp_name, exist_ok=True)
+    
+    logger = setup_logging(exp_name)
+    logger.info(f"Results will be saved to: {exp_name}")
+    
     run_training(
+        fusion_method=fusion_method,
         batch_size=64, 
-        num_epochs=20, 
+        num_epochs=50, 
         data_subset=False, 
         num_workers=16,
         data_root=DATA_PATH,
-        labels_root=LABELS_PATH
+        labels_root=LABELS_PATH,
+        experiment_name=exp_name
     )

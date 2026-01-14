@@ -130,6 +130,60 @@ class MultiAnnotatorFusion:
         """Convert probabilities to hard labels (argmax)"""
         return torch.argmax(probabilities, dim=0)
 
+class STAPLEFusionProvider:
+    """
+    Alternative fusion provider using the STAPLE algorithm.
+    Matches the interface of MultiAnnotatorFusion.
+    """
+    def __init__(self, num_classes: int = 7, max_iter: int = 20, tol: float = 1e-4):
+        self.num_classes = num_classes
+        self.max_iter = max_iter
+        self.tol = tol
+        self.sensitivity = None # p
+        self.specificity = None # q
+
+    def probabilistic_fusion(self, annotations: torch.Tensor) -> torch.Tensor:
+        # annotations: [N, H, W]
+        N, H, W = annotations.shape
+        C = self.num_classes
+        device = annotations.device
+        
+        # We cast them to int() to prevent the TypeError
+        shape_tuple = (int(C), int(H), int(W))
+        
+        # Convert to One-Hot: [N, C, H, W]
+        D = F.one_hot(annotations.long(), num_classes=C).permute(0, 3, 1, 2).float()
+        
+        # Initial estimate: Majority Vote
+        W_map = D.mean(dim=0) 
+
+        for i in range(self.max_iter):
+            old_W = W_map.clone()
+
+            # Using W_map instead of W to avoid confusion with W variable
+            sum_W = W_map.sum(dim=(1, 2)) + 1e-8      
+            sum_W_inv = (1 - W_map).sum(dim=(1, 2)) + 1e-8 
+            
+            self.sensitivity = (D * W_map).sum(dim=(2, 3)) / sum_W
+            self.specificity = ((1 - D) * (1 - W_map)).sum(dim=(2, 3)) / sum_W_inv
+            
+            p = torch.clamp(self.sensitivity, 0.01, 0.99).view(N, C, 1, 1)
+            q = torch.clamp(self.specificity, 0.01, 0.99).view(N, C, 1, 1)
+
+            log_W = torch.full(shape_tuple, torch.log(torch.tensor(1.0 / C)), device=device)
+
+            term = (D * torch.log(p)) + ((1 - D) * torch.log(1 - q))
+            log_W += term.sum(dim=0) 
+
+            W_map = F.softmax(log_W, dim=0)
+
+            if torch.abs(W_map - old_W).mean() < self.tol:
+                break
+
+        return W_map
+
+    def get_hard_labels(self, probabilities: torch.Tensor) -> torch.Tensor:
+        return torch.argmax(probabilities, dim=0)
 
 class MultiAnnotatorUNetDataset(Dataset):
     """
@@ -170,11 +224,17 @@ class MultiAnnotatorUNetDataset(Dataset):
             # Convert back to one-hot
             labels = F.one_hot(labels.long(), num_classes=C).permute(2, 0, 1).float()
 
+        reliabilities = getattr(self.fusion_method, 'annotator_reliabilities', torch.tensor(0))
+        sensitivity = getattr(self.fusion_method, 'sensitivity', torch.tensor(0))
+        specificity = getattr(self.fusion_method, 'specificity', torch.tensor(0))
+        
         return {
             'image': sample['image'],
             'labels': labels,
             'patient_id': sample['patient_id'],
             'original_labels': sample['labels'],  # Keep original for analysis
-            'reliabilities': self.fusion_method.annotator_reliabilities,
+            'reliabilities': reliabilities,
+            'sensitivity': sensitivity,
+            'specificity': specificity,
             'label_names': sample['label_names']
         }
