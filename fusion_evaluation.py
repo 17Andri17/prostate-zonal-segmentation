@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 
 from AnnotationFusion import MultiAnnotatorFusion, STAPLEFusionProvider
 from DataUtils import MultiAnnotatorProstateDataset
+from utils import find_common_patients_3
 
 random.seed(42)
 
@@ -107,15 +108,15 @@ def visualize(image, gt, fusion_pred, staple_pred, pid):
 
     plt.subplot(1, 4, 3)
     plt.imshow(fusion_pred, cmap="viridis")
-    plt.title("Fusion Prediction")
+    plt.title("Fusion")
     plt.axis("off")
 
     plt.subplot(1, 4, 4)
     plt.imshow(staple_pred, cmap="viridis")
-    plt.title("STAPLE Prediction")
+    plt.title("STAPLE")
     plt.axis("off")
 
-    plt.tight_layout()
+    # plt.tight_layout()
     plt.show()
 
 
@@ -127,7 +128,7 @@ def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_s
     # Load dataset
     dataset = MultiAnnotatorProstateDataset(data_root=data_root, labels_root=labels_root, prostatex_root=prostatex_root,
                                             patient_ids=patient_ids, modalities=["t2w"], target_size=(256, 256),
-                                            normalize=True, num_annotators=2)
+                                            normalize=True, num_annotators=3)
 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
@@ -235,15 +236,11 @@ def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_s
 
     # --- Hausdorff95 for PZ ---
     print("\nHausdorff95 (PZ):")
-    # fusion_hd_list_pz = list(np.array(fusion_hd_list_pz)[~np.isnan(fusion_hd_list_pz)])
-    # staple_hd_list_tz = list(np.array(staple_hd_list_tz)[~np.isnan(staple_hd_list_tz)])
     print(f"  Fusion : {np.nanmean(np.array(fusion_hd_list_pz)):.4f}")
     print(f"  STAPLE : {np.nanmean(np.array(staple_hd_list_pz)):.4f}")
 
     # --- Hausdorff95 for TZ ---
     print("\nHausdorff95 (TZ):")
-    # fusion_hd_list_tz = list(np.array(fusion_hd_list_tz)[~np.isnan(fusion_hd_list_tz)])
-    # staple_hd_list_tz = list(np.array(staple_hd_list_tz)[~np.isnan(staple_hd_list_tz)])
     print(f"  Fusion : {np.nanmean(np.array(fusion_hd_list_tz)):.4f}")
     print(f"  STAPLE : {np.nanmean(np.array(staple_hd_list_tz)):.4f}")
 
@@ -273,9 +270,10 @@ if __name__ == "__main__":
     LABELS_PATH = r"AI4AR_cont/Anatomical_Labels"
     PROSTATEX_PATH = r"ProstateZones"
 
-    with open("common_ids.txt", "r") as f:
+    find_common_patients_3(DATA_PATH, PROSTATEX_PATH)
+    with open("common_ids_3.txt", "r") as f:
         patient_ids = [line.strip() for line in f if line.strip()]
 
     evaluate_fusion(data_root=DATA_PATH, labels_root=LABELS_PATH, prostatex_root=PROSTATEX_PATH,
                     patient_ids=patient_ids,  # random.sample(patient_ids, 10), for visualize_results = True
-                    visualize_results=False)
+                    visualize_results=True)

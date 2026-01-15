@@ -1,6 +1,7 @@
 import os
 import re
 
+
 def extract_patient_ids_from_folders(root):
     """
     Reads folder names like 001, 002, ... and returns a set of integers.
@@ -49,3 +50,24 @@ def find_common_patients(patients_root, prostatex_root):
             f.write(f"{pid:03d}\n")
 
     print("Common patient IDs written to common_ids.txt")
+
+
+def find_common_patients_3(patients_root, prostatex_root):
+    dup_r1_root = f"{prostatex_root}/Duplicates/R1"
+    dup_r2_root = f"{prostatex_root}/Duplicates/R2"
+
+    # --- Extract IDs ---
+    folder_ids = extract_patient_ids_from_folders(patients_root)  # 3-digit → int
+    dup_r1_ids = extract_patient_ids_from_files(dup_r1_root, r"Seg-(\d{4})_R1\.nrrd")
+    dup_r2_ids = extract_patient_ids_from_files(dup_r2_root, r"Seg-(\d{4})_R2\.nrrd")
+
+    # Convert folder IDs (3-digit) → 4-digit padded
+    seg_ids_3 = {int(f"{i:03d}") for i in dup_r1_ids if i in dup_r2_ids}
+
+    # --- Find common IDs ---
+    common = seg_ids_3 & folder_ids
+
+    # --- Write results ---
+    with open("common_ids_3.txt", "w") as f:
+        for pid in sorted(common):
+            f.write(f"{pid:03d}\n")
