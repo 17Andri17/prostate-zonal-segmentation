@@ -128,7 +128,7 @@ def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_s
     # Load dataset
     dataset = MultiAnnotatorProstateDataset(data_root=data_root, labels_root=labels_root, prostatex_root=prostatex_root,
                                             patient_ids=patient_ids, modalities=["t2w"], target_size=(256, 256),
-                                            normalize=True, num_annotators=3)
+                                            normalize=True, num_annotators=3, include_R2=True)
 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
