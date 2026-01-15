@@ -1,25 +1,24 @@
 import copy
 import logging
 import os
-import re
 import time
 from collections import defaultdict
 from typing import List, Tuple, Dict
 
+import matplotlib.patches as mpatches
 import numpy as np
 import torch
+import torch.nn.functional as F
 from matplotlib import pyplot as plt
-import matplotlib.patches as mpatches
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from sklearn.model_selection import train_test_split
 from torch import GradScaler, autocast, nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from AnnotationFusion import MultiAnnotatorFusion, MultiAnnotatorUNetDataset, STAPLEFusionProvider
+from AnnotationFusion import MultiAnnotatorUNetDataset, STAPLEFusionProvider
 from DataUtils import MultiAnnotatorProstateDataset
-from UNet import UNet
 from Loss import CombinedLoss
+from UNet import UNet
 from utils import find_common_patients
 
 
@@ -28,13 +27,14 @@ def setup_logging(exp_path):
     # Clear existing handlers
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
-        
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[logging.FileHandler(log_filename), logging.StreamHandler()]
     )
     return logging.getLogger(__name__)
+
 
 class ProstateSegmentationTrainer:
     """Complete training and evaluation pipeline"""
@@ -129,7 +129,7 @@ class ProstateSegmentationTrainer:
             num_batches += 1
 
             # Log progress
-            if True:  #(batch_idx + 1) % 10 == 0:
+            if True:  # (batch_idx + 1) % 10 == 0:
                 logger.info(f"  Batch {batch_idx + 1}/{len(self.train_loader)}: "
                             f"Loss={loss.item():.4f}, Dice={dice_score:.4f}")
 
@@ -416,19 +416,18 @@ class ProstateSegmentationTrainer:
 
     def visualize_predictions(self, results: Dict, num_samples: int = 3, folder_name: str = 'visualizations'):
         """Visualize model predictions"""
-        
-        label_names = ['NO-PG', 'PZ', 'TZ']  #['NO-PG', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
-        colors = ['black', 'cyan', 'green'] #'blue'
+
+        label_names = ['NO-PG', 'PZ', 'TZ']  # ['NO-PG', 'AFS', 'CZ', 'PG', 'PZ', 'SV_L', 'SV_R', 'TZ']
+        colors = ['black', 'cyan', 'green']  # 'blue'
         cmap = ListedColormap(colors)
         norm = BoundaryNorm(range(len(colors) + 1), cmap.N)
-
 
         if not os.path.exists(folder_name):
             os.makedirs(folder_name, exist_ok=True)
 
         for sample_idx in range(num_samples):
             # Get sample
-            pred_probs = results['predictions'][0][sample_idx] # Accessing patient index within batch 0
+            pred_probs = results['predictions'][0][sample_idx]  # Accessing patient index within batch 0
             gt = results['ground_truths'][0][sample_idx]
             patient_id = results['patient_ids'][sample_idx]
 
@@ -478,7 +477,7 @@ class ProstateSegmentationTrainer:
                 fontsize=9
             )
 
-            #plt.tight_layout()
+            # plt.tight_layout()
             timestamp = time.strftime('%Y%m%d_%H%M')
             file_name = f"patient_{patient_id}_sample_{sample_idx}_{timestamp}.png"
 
@@ -489,16 +488,16 @@ class ProstateSegmentationTrainer:
 
 
 def run_training(
-    fusion_method,
-    batch_size=16, 
-    num_epochs=50, 
-    load_pretrained=False, 
-    data_subset=False, 
-    num_workers=16,
-    data_root="/root/data/AI4AR_cont/Data",
-    labels_root="/root/data/AI4AR_cont/Anatomical_Labels",
-    prostatex_root="/root/data/AI4AR_cont/ProstateZones",
-    experiment_name="exp/STAPLE"
+        fusion_method,
+        batch_size=16,
+        num_epochs=50,
+        load_pretrained=False,
+        data_subset=False,
+        num_workers=16,
+        data_root="/root/data/AI4AR_cont/Data",
+        labels_root="/root/data/AI4AR_cont/Anatomical_Labels",
+        prostatex_root="/root/data/AI4AR_cont/ProstateZones",
+        experiment_name="exp/STAPLE"
 ):
     logger.info("Alive")
 
@@ -508,7 +507,6 @@ def run_training(
 
     with open("common_ids.txt", "r") as f:
         patient_ids = [line.strip() for line in f if line.strip()]
-
 
     # patient_ids = [d for d in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, d))]
 
@@ -534,10 +532,10 @@ def run_training(
         labels_root=labels_root,
         prostatex_root=prostatex_root,
         patient_ids=train_ids,
-        modalities=['t2w'], # 'cor', 'sag',
+        modalities=['t2w'],  # 'cor', 'sag',
         target_size=(256, 256),
         normalize=True,
-        num_annotators=3,
+        num_annotators=2,
         annotator_variance=0.1
     )
 
@@ -546,10 +544,10 @@ def run_training(
         labels_root=labels_root,
         prostatex_root=prostatex_root,
         patient_ids=val_ids,
-        modalities=['t2w'], # 'cor', 'sag',
+        modalities=['t2w'],  # 'cor', 'sag',
         target_size=(256, 256),
         normalize=True,
-        num_annotators=3,
+        num_annotators=2,
         annotator_variance=0.1
     )
 
@@ -558,13 +556,12 @@ def run_training(
         labels_root=labels_root,
         prostatex_root=prostatex_root,
         patient_ids=test_ids,
-        modalities=['t2w'], # 'cor', 'sag',
+        modalities=['t2w'],  # 'cor', 'sag',
         target_size=(256, 256),
         normalize=True,
-        num_annotators=3,
+        num_annotators=2,
         annotator_variance=0.1
     )
-
 
     train_fused_dataset = MultiAnnotatorUNetDataset(
         base_dataset=train_dataset,
@@ -638,7 +635,6 @@ def run_training(
     else:
         trainer.load_pretrained_model()
 
-
     # Evaluate on test set
     logger.info("\n" + "=" * 60)
     logger.info("EVALUATION ON TEST SET")
@@ -675,13 +671,14 @@ def run_training(
     logger.info(f"Best validation Dice: {trainer.best_val_dice:.4f}")
     logger.info(f"Test Dice: {avg_results['mean_dice']:.4f}")
 
+
 if __name__ == '__main__':
-    #TO RUN ON SMALL SUBSET OF DATA, SET DATA_SUBSET=True
+    # TO RUN ON SMALL SUBSET OF DATA, SET DATA_SUBSET=True
     DATA_PATH = r"AI4AR_cont/Data"
     LABELS_PATH = r"AI4AR_cont/Anatomical_Labels"
     PROSTATEX_PATH = r"ProstateZones"
 
-    #RUN ONLY ONCE (OR WHEN DATA FILES CHANGE)
+    # RUN ONLY ONCE (OR WHEN DATA FILES CHANGE)
     find_common_patients(DATA_PATH, PROSTATEX_PATH)
 
     # Apply multi-annotator fusion or STAPLE
@@ -690,10 +687,10 @@ if __name__ == '__main__':
     base_folder = "exp/STAPLE_100_epochs"
     exp_name = f"{base_folder}"
     os.makedirs(exp_name, exist_ok=True)
-    
+
     logger = setup_logging(exp_name)
     logger.info(f"Results will be saved to: {exp_name}")
-    
+
     run_training(
         fusion_method=fusion_method,
         batch_size=4,
@@ -702,6 +699,6 @@ if __name__ == '__main__':
         num_workers=0,
         data_root=DATA_PATH,
         labels_root=LABELS_PATH,
-        prostatex_root = PROSTATEX_PATH,
+        prostatex_root=PROSTATEX_PATH,
         experiment_name=exp_name
     )
