@@ -206,7 +206,7 @@ def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_s
             visualize(image[0].cpu().numpy(), gt.cpu().numpy(), fusion_pred.cpu().numpy(), staple_pred.cpu().numpy(),
                       pid)
 
-    print("\n==================== SUMMARY ====================")
+    print("\n==================== SUMMARY: Dice ====================")
 
     def mean_class_dice(results, class_id):
         return sum(r[class_id] for r in results) / len(results)
@@ -227,6 +227,31 @@ def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_s
     print("\nMean Dice (all classes):")
     print(f"  Fusion : {fusion_overall:.4f}")
     print(f"  STAPLE : {staple_overall:.4f}")
+
+    print("\n==================== SUMMARY: Hausdorff95 ====================")
+
+    def mean(values):
+        return sum(values) / len(values) if len(values) > 0 else float("nan")
+
+    # --- Hausdorff95 for PZ ---
+    print("\nHausdorff95 (PZ):")
+    # fusion_hd_list_pz = list(np.array(fusion_hd_list_pz)[~np.isnan(fusion_hd_list_pz)])
+    # staple_hd_list_tz = list(np.array(staple_hd_list_tz)[~np.isnan(staple_hd_list_tz)])
+    print(f"  Fusion : {np.nanmean(np.array(fusion_hd_list_pz)):.4f}")
+    print(f"  STAPLE : {np.nanmean(np.array(staple_hd_list_pz)):.4f}")
+
+    # --- Hausdorff95 for TZ ---
+    print("\nHausdorff95 (TZ):")
+    # fusion_hd_list_tz = list(np.array(fusion_hd_list_tz)[~np.isnan(fusion_hd_list_tz)])
+    # staple_hd_list_tz = list(np.array(staple_hd_list_tz)[~np.isnan(staple_hd_list_tz)])
+    print(f"  Fusion : {np.nanmean(np.array(fusion_hd_list_tz)):.4f}")
+    print(f"  STAPLE : {np.nanmean(np.array(staple_hd_list_tz)):.4f}")
+
+    print("\n==================== SUMMARY: Calibration Error (ECE) ====================")
+
+    print(f"\nECE:")
+    print(f"  Fusion : {mean(fusion_ece_list):.4f}")
+    print(f"  STAPLE : {mean(staple_ece_list):.4f}")
 
     print("\n=== Statistical Significance Tests ===")
 
