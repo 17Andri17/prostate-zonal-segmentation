@@ -18,14 +18,11 @@ This project implements a U-Net based segmentation system for prostate zonal ana
 ## Project Structure
 
 ```
-├── README.md                          # This file
 ├── requirements.txt                   # Python dependencies
 ├── Trainer.py                         # Main training pipeline and evaluation
 ├── fusion_evaluation.py                # Fusion method comparison and evaluation
 ├── segmentation.ipynb                 # Complete segmentation workflow notebook
-├── testing_notebook.ipynb             # Data loading and testing notebook
 ├── testDataUtils.py                   # Unit tests for data utilities
-├── common_ids.txt                     # List of common patient IDs
 │
 ├── Utils/
 │   ├── UNet.py                        # U-Net architecture implementation
@@ -35,11 +32,6 @@ This project implements a U-Net based segmentation system for prostate zonal ana
 │   └── utils.py                       # Helper utilities
 │
 └── exp/                               # Experiment results and models
-    ├── FUSION_batch32_epochs100/
-    ├── FUSION_100_epochs_DICE50_CE50/
-    ├── STAPLE/
-    ├── STAPLE_100_epochs/
-    └── [other experimental variants]/
 ```
 
 ### Setup
