@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 
-from DataUtils import MultiAnnotatorProstateDataset
+from Utils.DataUtils import MultiAnnotatorProstateDataset
 
 
 def visualize_sample(sample):

@@ -7,9 +7,9 @@ from scipy.spatial.distance import cdist
 from scipy.stats import ttest_rel, wilcoxon
 from torch.utils.data import DataLoader
 
-from AnnotationFusion import MultiAnnotatorFusion, STAPLEFusionProvider
-from DataUtils import MultiAnnotatorProstateDataset
-from utils import find_common_patients_3
+from Utils.AnnotationFusion import MultiAnnotatorFusion, STAPLEFusionProvider
+from Utils.DataUtils import MultiAnnotatorProstateDataset
+from Utils.utils import find_common_patients_3
 
 random.seed(42)
 

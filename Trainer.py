@@ -15,11 +15,11 @@ from sklearn.model_selection import train_test_split
 from torch import GradScaler, autocast, nn
 from torch.utils.data import DataLoader
 
-from AnnotationFusion import MultiAnnotatorUNetDataset, STAPLEFusionProvider
-from DataUtils import MultiAnnotatorProstateDataset
-from Loss import CombinedLoss
-from UNet import UNet
-from utils import find_common_patients
+from Utils.AnnotationFusion import MultiAnnotatorUNetDataset, STAPLEFusionProvider
+from Utils.DataUtils import MultiAnnotatorProstateDataset
+from Utils.Loss import CombinedLoss
+from Utils.UNet import UNet
+from Utils.utils import find_common_patients
 
 
 def setup_logging(exp_path):
