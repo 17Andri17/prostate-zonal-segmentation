@@ -27,6 +27,7 @@ def extract_patient_ids_from_files(folder, pattern):
 
 
 def find_common_patients(patients_root, prostatex_root):
+    """ Finds common patient ids between 2 annotators"""
     singles_root = f"{prostatex_root}/Singles"
     dup_r1_root = f"{prostatex_root}/Duplicates/R1"
 
@@ -53,6 +54,7 @@ def find_common_patients(patients_root, prostatex_root):
 
 
 def find_common_patients_3(patients_root, prostatex_root):
+    """ Finds common patient ids between 3 annotators"""
     dup_r1_root = f"{prostatex_root}/Duplicates/R1"
     dup_r2_root = f"{prostatex_root}/Duplicates/R2"
 

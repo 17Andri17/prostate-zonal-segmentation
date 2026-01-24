@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import torch
 from torch.utils.data import DataLoader
 
 from Utils.DataUtils import MultiAnnotatorProstateDataset
@@ -18,8 +17,8 @@ def visualize_sample(sample):
     labels = sample["labels"].numpy()  # [num_annotators, 3, H, W]
     pid = sample["patient_id"]
 
-    ann1 = labels[0]   # [3, H, W]
-    ann2 = labels[1]   # [3, H, W]
+    ann1 = labels[0]  # [3, H, W]
+    ann2 = labels[1]  # [3, H, W]
 
     # Convert multi‑channel masks to single‑label maps for visualization
     ann1_map = ann1.argmax(axis=0)
@@ -71,7 +70,7 @@ def test_dataset():
     )
 
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
-    i=0
+    i = 0
     for batch in loader:
         sample = {
             "image": batch["image"][0],
@@ -84,10 +83,9 @@ def test_dataset():
         print("Labels shape:", sample["labels"].shape)  # [2, 3, H, W]
 
         visualize_sample(sample)
-        i+=1
-        if i==2:
+        i += 1
+        if i == 2:
             break
-        #break  # visualize only first sample
 
 
 if __name__ == "__main__":

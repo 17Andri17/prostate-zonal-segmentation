@@ -10,7 +10,6 @@ from torch.utils.data import Dataset
 class MultiAnnotatorProstateDataset(Dataset):
     """
     Dataset for loading prostate MRI data with simulated multi-annotator support.
-    In real scenario, this would load annotations from different doctors.
     """
 
     def __init__(self,
@@ -260,10 +259,7 @@ class MultiAnnotatorProstateDataset(Dataset):
         else:
             raise Exception(f"Prostatex segmentation for patient {pid4} not found")
 
-        # labels_dictx = self.load_labels_nrrd(dup_r1_path)
         prostatex_tensor = self.transform_labels_nrrd(labels_dictx)
-        # labels_dictx_2 = self.load_labels_nrrd(dup_r2_path)
-        # prostatex_tensor_2 = self.transform_labels_nrrd(labels_dictx_2)
 
         # Stack annotator labels
         if self.include_R2:

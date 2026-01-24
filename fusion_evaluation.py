@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from Utils.AnnotationFusion import MultiAnnotatorFusion, STAPLEFusionProvider
 from Utils.DataUtils import MultiAnnotatorProstateDataset
-from Utils.utils import find_common_patients_3
+from Utils.utils import find_common_patients_3, find_common_patients
 
 random.seed(42)
 
@@ -93,7 +93,7 @@ def dice_score(pred, gt, num_classes=3):
 # ---------------------------------------------------------
 # Visualization
 # ---------------------------------------------------------
-def visualize(image, gt, fusion_pred, staple_pred, pid):
+def visualize(image, gt, fusion_pred, staple_pred, pid, num_annotators):
     plt.figure(figsize=(16, 4))
 
     plt.subplot(1, 4, 1)
@@ -108,15 +108,14 @@ def visualize(image, gt, fusion_pred, staple_pred, pid):
 
     plt.subplot(1, 4, 3)
     plt.imshow(fusion_pred, cmap="viridis")
-    plt.title("Fusion")
+    plt.title(f"Fusion: {num_annotators} annotators")
     plt.axis("off")
 
     plt.subplot(1, 4, 4)
     plt.imshow(staple_pred, cmap="viridis")
-    plt.title("STAPLE")
+    plt.title(f"STAPLE: {num_annotators} annotators")
     plt.axis("off")
 
-    # plt.tight_layout()
     plt.show()
 
 
@@ -124,11 +123,13 @@ def visualize(image, gt, fusion_pred, staple_pred, pid):
 # Evaluation Loop
 # ---------------------------------------------------------
 def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_size=1, visualize_results=False,
-                    device="cuda" if torch.cuda.is_available() else "cpu"):
+                    device="cuda" if torch.cuda.is_available() else "cpu", num_annotators=2):
+    assert num_annotators == 2 or num_annotators == 3
     # Load dataset
     dataset = MultiAnnotatorProstateDataset(data_root=data_root, labels_root=labels_root, prostatex_root=prostatex_root,
                                             patient_ids=patient_ids, modalities=["t2w"], target_size=(256, 256),
-                                            normalize=True, num_annotators=3, include_R2=True)
+                                            normalize=True, num_annotators=num_annotators,
+                                            include_R2=num_annotators == 3)
 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
@@ -205,7 +206,7 @@ def evaluate_fusion(data_root, labels_root, prostatex_root, patient_ids, batch_s
             print("STAPLE Dice:", staple_dice)
 
             visualize(image[0].cpu().numpy(), gt.cpu().numpy(), fusion_pred.cpu().numpy(), staple_pred.cpu().numpy(),
-                      pid)
+                      pid, num_annotators)
 
     print("\n==================== SUMMARY: Dice ====================")
 
@@ -270,10 +271,22 @@ if __name__ == "__main__":
     LABELS_PATH = r"AI4AR_cont/Anatomical_Labels"
     PROSTATEX_PATH = r"ProstateZones"
 
+    # 3 annotators comparison
+    print("================== 3 annotators comparison ==================")
     find_common_patients_3(DATA_PATH, PROSTATEX_PATH)
     with open("common_ids_3.txt", "r") as f:
         patient_ids = [line.strip() for line in f if line.strip()]
 
     evaluate_fusion(data_root=DATA_PATH, labels_root=LABELS_PATH, prostatex_root=PROSTATEX_PATH,
                     patient_ids=patient_ids,  # random.sample(patient_ids, 10), for visualize_results = True
-                    visualize_results=True)
+                    visualize_results=True, num_annotators=3)
+
+    # 2 annotators comparison
+    print("\n\n================== 2 annotators comparison ==================")
+    find_common_patients(DATA_PATH, PROSTATEX_PATH)
+    with open("common_ids.txt", "r") as f:
+        patient_ids = [line.strip() for line in f if line.strip()]
+
+    evaluate_fusion(data_root=DATA_PATH, labels_root=LABELS_PATH, prostatex_root=PROSTATEX_PATH,
+                    patient_ids=patient_ids,  # random.sample(patient_ids, 10), for visualize_results = True
+                    visualize_results=True, num_annotators=2)

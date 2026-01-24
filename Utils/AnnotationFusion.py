@@ -32,21 +32,17 @@ class MultiAnnotatorFusion:
         """
         N, H, W = annotations.shape
         device = annotations.device
-        
-        # Count votes for each class at each pixel: [H, W, C]
-        class_counts = torch.zeros(H, W, self.num_classes, device=device)
-        
-        # More efficient: Use one-hot encoding
+
         one_hot = F.one_hot(annotations.long(), num_classes=self.num_classes).float()  # [N, H, W, C]
         class_counts = one_hot.sum(dim=0)  # [H, W, C]
-        
+
         # Probability distribution p_c(x)
         p = class_counts / max(N, 1)  # [H, W, C]
-        
+
         # Ambiguity weight: 1 - max_c p_c(x)
         max_probs, _ = p.max(dim=-1)  # [H, W]
         pixel_ambiguity = 1 - max_probs  # [H, W]
-        
+
         return pixel_ambiguity
 
     def compute_annotator_reliability(self, annotations: torch.Tensor) -> torch.Tensor:
@@ -63,19 +59,19 @@ class MultiAnnotatorFusion:
         """
         N, H, W = annotations.shape
         device = annotations.device
-        
+
         # Compute pixel ambiguity weights
         ambiguity_weights = self.compute_pixel_ambiguity(annotations)  # [H, W]
-        
+
         # Total weight Σ_x w(x)
         total_weight = ambiguity_weights.sum()
-        
+
         if N <= 1:
             # If only 1 annotator, reliability is 1.0
             reliability_scores = torch.ones(N, device=device)
             self.annotator_reliabilities = reliability_scores
             return reliability_scores
-        
+
         # Pre-calculate total weight for normalization
         if total_weight > self.epsilon:
             inv_total_weight = 1.0 / total_weight
@@ -84,39 +80,39 @@ class MultiAnnotatorFusion:
             reliability_scores = torch.ones(N, device=device) / N
             self.annotator_reliabilities = reliability_scores
             return reliability_scores
-        
+
         # Initialize reliability scores
         reliability_scores = torch.zeros(N, device=device)
-        
+
         # Compute agreement for each pair of annotators
         # Use broadcasting for efficiency
         annotations_i = annotations.unsqueeze(1)  # [N, 1, H, W]
         annotations_j = annotations.unsqueeze(0)  # [1, N, H, W]
-        
+
         # Agreement matrix: 1[A_i(x) = A_j(x)] for all i,j pairs
         agreement = (annotations_i == annotations_j).float()  # [N, N, H, W]
-        
+
         # Weighted agreement: w(x) * 1[A_i(x) = A_j(x)]
         # Expand ambiguity_weights to match shape: [1, 1, H, W]
         w_expanded = ambiguity_weights.unsqueeze(0).unsqueeze(0)
         weighted_agreement = agreement * w_expanded  # [N, N, H, W]
-        
+
         # Sum over spatial dimensions: Σ_x w(x) * 1[A_i(x) = A_j(x)]
         weighted_agreement_sum = weighted_agreement.sum(dim=(2, 3))  # [N, N]
-        
+
         # Normalize by total weight
         normalized_agreement = weighted_agreement_sum * inv_total_weight  # [N, N]
-        
+
         # Exclude self-comparisons (i ≠ j)
         # Create mask with False on diagonal
         mask = torch.eye(N, device=device, dtype=torch.bool)
-        
+
         # Set diagonal to 0 (self-agreement doesn't count)
         normalized_agreement_masked = normalized_agreement.masked_fill(mask, 0)
-        
+
         # Sum over j ≠ i and divide by (N-1)
         reliability_scores = normalized_agreement_masked.sum(dim=1) / (N - 1)
-        
+
         self.annotator_reliabilities = reliability_scores
         return reliability_scores
 
@@ -136,83 +132,82 @@ class MultiAnnotatorFusion:
         """
         N, H, W = annotations.shape
         device = annotations.device
-        
+
         if reliabilities is None:
             reliabilities = self.compute_annotator_reliability(annotations)
-        
+
         # Normalize reliabilities for weighted sum
         if reliabilities.sum() > self.epsilon:
             normalized_reliabilities = reliabilities / reliabilities.sum()
         else:
             normalized_reliabilities = torch.ones_like(reliabilities) / N
-        
+
         # Convert to one-hot encoding: [N, C, H, W]
         one_hot = F.one_hot(annotations.long(), num_classes=self.num_classes)
         one_hot = one_hot.permute(0, 3, 1, 2).float()
-        
+
         # Weight each annotator's one-hot encoding by their reliability
         # Expand weights to shape [N, 1, 1, 1] for broadcasting
         weights = normalized_reliabilities.view(N, 1, 1, 1)
-        
+
         # Weighted sum: Σ_i R_i * 1[A_i(x) = c]
         weighted_one_hot = one_hot * weights
-        
+
         # Sum across annotators to get P(c|x)
         fused_probabilities = weighted_one_hot.sum(dim=0)  # [C, H, W]
-        
-        # Note: According to your equation, this should already be normalized
-        # since we used normalized_reliabilities that sum to 1
-        
+
         return fused_probabilities
 
     def get_hard_labels(self, probabilities: torch.Tensor) -> torch.Tensor:
         """Convert probabilities to hard labels (argmax)"""
         return torch.argmax(probabilities, dim=0)
 
+
 class STAPLEFusionProvider:
     """
     Alternative fusion provider using the STAPLE algorithm.
     Matches the interface of MultiAnnotatorFusion.
     """
+
     def __init__(self, num_classes: int = 3, max_iter: int = 20, tol: float = 1e-4):
         self.num_classes = num_classes
         self.max_iter = max_iter
         self.tol = tol
-        self.sensitivity = None # p
-        self.specificity = None # q
+        self.sensitivity = None  # p
+        self.specificity = None  # q
 
     def probabilistic_fusion(self, annotations: torch.Tensor) -> torch.Tensor:
         # annotations: [N, H, W]
         N, H, W = annotations.shape
         C = self.num_classes
         device = annotations.device
-        
+
         # We cast them to int() to prevent the TypeError
         shape_tuple = (int(C), int(H), int(W))
-        
+
         # Convert to One-Hot: [N, C, H, W]
         D = F.one_hot(annotations.long(), num_classes=C).permute(0, 3, 1, 2).float()
-        
+
         # Initial estimate: Majority Vote
-        W_map = D.mean(dim=0) 
+        W_map = D.mean(dim=0)
 
         for i in range(self.max_iter):
             old_W = W_map.clone()
 
             # Using W_map instead of W to avoid confusion with W variable
-            sum_W = W_map.sum(dim=(1, 2)) + 1e-8      
-            sum_W_inv = (1 - W_map).sum(dim=(1, 2)) + 1e-8 
-            
+            sum_W = W_map.sum(dim=(1, 2)) + 1e-8
+            sum_W_inv = (1 - W_map).sum(dim=(1, 2)) + 1e-8
+
             self.sensitivity = (D * W_map).sum(dim=(2, 3)) / sum_W
             self.specificity = ((1 - D) * (1 - W_map)).sum(dim=(2, 3)) / sum_W_inv
-            
+
             p = torch.clamp(self.sensitivity, 0.01, 0.99).view(N, C, 1, 1)
             q = torch.clamp(self.specificity, 0.01, 0.99).view(N, C, 1, 1)
 
             log_W = torch.full(shape_tuple, torch.log(torch.tensor(1.0 / C)), device=device)
 
             term = (D * torch.log(p)) + ((1 - D) * torch.log(1 - q))
-            log_W += term.sum(dim=0) 
+            log_W += term.sum(dim=0)
 
             W_map = F.softmax(log_W, dim=0)
 
@@ -223,6 +218,7 @@ class STAPLEFusionProvider:
 
     def get_hard_labels(self, probabilities: torch.Tensor) -> torch.Tensor:
         return torch.argmax(probabilities, dim=0)
+
 
 class MultiAnnotatorUNetDataset(Dataset):
     """
@@ -266,7 +262,7 @@ class MultiAnnotatorUNetDataset(Dataset):
         reliabilities = getattr(self.fusion_method, 'annotator_reliabilities', torch.tensor(0))
         sensitivity = getattr(self.fusion_method, 'sensitivity', torch.tensor(0))
         specificity = getattr(self.fusion_method, 'specificity', torch.tensor(0))
-        
+
         return {
             'image': sample['image'],
             'labels': labels,
