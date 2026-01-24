@@ -653,7 +653,6 @@ def run_training(
 
     # Visualize predictions
     logger.info("\nGenerating prediction visualizations...")
-    # WYWALA SIĘ JAK NUM_SAMPLES JEST WIĘKSZE (NP. 10)----????
     trainer.visualize_predictions(detailed_results, num_samples=3, folder_name=experiment_name)
 
     # Save final model
